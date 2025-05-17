@@ -25,7 +25,7 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
       if (i >= str.length) break
 
       // If the line starts with ';', skip to the end of the line
-      if (str.substring(i, i + 2) === ";") {
+      if (str[i] === ";") {
         while (i < str.length && str[i] !== "\n") {
           i++
         }
