@@ -155,7 +155,7 @@ export default function LispInterpreter() {
               id="runtimeUserInput"
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded shadow-sm font-mono"
+              className="w-full p-3 border border-gray-300 rounded shadow-sm font-mono overflow-y-auto resize-none"
               placeholder="Multi-line input for Lisp program..."
               rows={5}
               spellCheck={false}
