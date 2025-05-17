@@ -109,8 +109,8 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
     } else if (token === ")") {
       throw new Error("Unexpected closing parenthesis")
     } else if (token?.startsWith('"') && token.endsWith('"')) {
-      // Handle string literals
-      return token.slice(1, -1)
+      // Handle string literals: return a String object to distinguish from symbols
+      return new String(token.slice(1, -1))
     } else {
       // Return atom (number or symbol)
       if (token === "nil") return []
@@ -485,16 +485,186 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
       },
       format: (...args: LispValue[]): LispValue => {
         if (args.length < 2) throw new Error("format: Expected at least 2 arguments");
-        const [stream, formatStr, ...otherArgs] = args;
-        if (typeof formatStr !== "string") throw new Error("format: Format string must be a string");
-        let result = formatStr;
-        let argIndex = 0;
-        result = result.replace(/%[sd]/g, () => formatLispValue(otherArgs[argIndex++]));
-        if (stream === "t") {
-          outputBuffer.push(result);
-          return result;
+        const [streamArg, formatStringArg, ...otherArgs] = args;
+
+        let actualFormatString: string;
+        if (formatStringArg instanceof String) {
+          actualFormatString = formatStringArg.valueOf();
+        } else if (typeof formatStringArg === 'string') {
+          actualFormatString = formatStringArg;
         } else {
-          return null;
+          throw new Error("format: Format string argument must be a string value");
+        }
+
+        let tempResult = "";
+        let currentArgIndex = 0;
+
+        for (let i = 0; i < actualFormatString.length; i++) {
+          if (actualFormatString[i] === '~' && i + 1 < actualFormatString.length) {
+            i++; // Consume ~
+
+            const params: (number | string)[] = [];
+            let charIndex = i;
+
+            // Parse parameters: numbers, or 'c
+            while (charIndex < actualFormatString.length) {
+              const char = actualFormatString[charIndex];
+              if (char >= '0' && char <= '9') {
+                let numStr = "";
+                while (charIndex < actualFormatString.length && actualFormatString[charIndex] >= '0' && actualFormatString[charIndex] <= '9') {
+                  numStr += actualFormatString[charIndex];
+                  charIndex++;
+                }
+                params.push(parseInt(numStr));
+                if (charIndex < actualFormatString.length && actualFormatString[charIndex] === ',') {
+                  charIndex++; // Consume comma, look for more params
+                } else {
+                  break; // End of params or start of directive
+                }
+              } else if (char === "'") {
+                if (charIndex + 1 < actualFormatString.length) {
+                  params.push(actualFormatString[charIndex + 1]); // Store the char itself
+                  charIndex += 2; // Consume ' and char
+                  if (charIndex < actualFormatString.length && actualFormatString[charIndex] === ',') {
+                    charIndex++; // Consume comma
+                  } else {
+                    break;
+                  }
+                } else { // Dangling '
+                  tempResult += "~'"; // Output dangling ' literally
+                  i = charIndex; // current i will be advanced by outer loop
+                  break; // Break from param parsing
+                }
+              } else { // Not a number, not 'c, must be directive or modifier
+                break;
+              }
+            }
+            
+            if (charIndex >= actualFormatString.length) {
+              // Unterminated directive string after params
+              tempResult += "~" + params.map(p => typeof p === 'string' ? `'${p}` : p).join(',');
+
+              i = charIndex -1; // Adjust i so outer loop terminates correctly
+              continue;
+            }
+
+            // TODO: Handle colon (:) and at-sign (@) modifiers here if they appear before the directive char.
+            // For now, assume they are not used or are part of the directive char itself.
+
+            const directive = actualFormatString[charIndex];
+            i = charIndex; // Set main loop index to the directive character
+
+            const requiresArgument = "ASDFX".includes(directive.toUpperCase()); // Add other arg-taking directives like C, B, O, R etc. if implemented
+
+            if (requiresArgument && currentArgIndex >= otherArgs.length && directive.toUpperCase() !== '%') {
+              // Not enough arguments for a directive that needs one (excluding ~%)
+              tempResult += "~" + params.map(p => typeof p === 'string' ? `'${p}` : p).join(',') + directive; // Output as unhandled
+              continue; // Next char in format string
+            }
+            
+            const currentArg = requiresArgument ? otherArgs[currentArgIndex] : undefined;
+
+            switch (directive.toUpperCase()) {
+              case 'A': // Aesthetic
+              case 'S': // Standard
+                tempResult += formatLispValue(currentArg);
+                if (requiresArgument) currentArgIndex++;
+                break;
+              case 'D': { // Decimal
+                const valD = currentArg;
+                if (typeof valD !== 'number') {
+                    tempResult += `[~D error: Not a number: ${formatLispValue(valD)}]`;
+                    if (requiresArgument) currentArgIndex++;
+                    break;
+                }
+                let strD = Math.floor(valD).toString();
+                const mincol = params[0] as number | undefined;
+                const padchar = typeof params[1] === 'string' ? params[1] : ' '; // Default pad is space
+
+                if (mincol !== undefined) {
+                  strD = strD.padStart(mincol, padchar);
+                }
+                tempResult += strD;
+                if (requiresArgument) currentArgIndex++;
+                break;
+              }
+              case 'X': { // Hexadecimal
+                const valX = currentArg;
+                 if (typeof valX !== 'number') {
+                    tempResult += `[~X error: Not a number: ${formatLispValue(valX)}]`;
+                    if (requiresArgument) currentArgIndex++;
+                    break;
+                }
+                let strX = Math.floor(valX).toString(16).toUpperCase();
+                const mincol = params[0] as number | undefined;
+                const padchar = typeof params[1] === 'string' ? params[1] : '0'; // Default pad for ~X is '0'
+
+                if (mincol !== undefined) {
+                  strX = strX.padStart(mincol, padchar);
+                }
+                tempResult += strX;
+                if (requiresArgument) currentArgIndex++;
+                break;
+              }
+              case 'F': { // Floating point
+                const valF = currentArg;
+                if (typeof valF !== 'number') {
+                    tempResult += `[~F error: Not a number: ${formatLispValue(valF)}]`;
+                    if (requiresArgument) currentArgIndex++;
+                    break;
+                }
+                
+                const width = params[0] as number | undefined;
+                const d_precision = params[1] as number | undefined;
+                // const k_scale = params[2] as number | undefined; // Not implemented
+                // const overflowchar = typeof params[3] === 'string' ? params[3] : undefined; // Not implemented
+                const padF = typeof params[4] === 'string' ? params[4] : ' '; // Default pad is space
+
+                let strF;
+                if (d_precision !== undefined) {
+                  strF = valF.toFixed(d_precision);
+                } else {
+                  strF = valF.toString(); // Basic conversion if no precision
+                }
+
+                if (width !== undefined) {
+                  strF = strF.padStart(width, padF);
+                }
+                tempResult += strF;
+                if (requiresArgument) currentArgIndex++;
+                break;
+              }
+              case '%': // Newline
+                tempResult += '\n';
+                break;
+              default:
+                // For unhandled directives, reconstruct and append.
+                // Consume argument if this directive type generally requires one.
+                tempResult += "~";
+                params.forEach((p, idx) => {
+                    tempResult += (typeof p === 'string' ? `'${p}` : p.toString());
+                    if (idx < params.length -1) tempResult += ",";
+
+                });
+                tempResult += directive;
+                if (requiresArgument) {
+                   currentArgIndex++; 
+                }
+                break;
+            }
+          } else { // Not a tilde, or tilde at the very end of the string
+            tempResult += actualFormatString[i];
+          }
+        }
+        const processedOutput = tempResult;
+
+        if (streamArg === true) { // Output to t (standard output)
+          outputBuffer.push(processedOutput);
+          return null; // `format t ...` returns nil
+        } else if (streamArg === null || (Array.isArray(streamArg) && streamArg.length === 0)) { // Output to nil (construct string)
+          return processedOutput;
+        } else {
+          throw new Error(`format: Unsupported stream argument: ${formatLispValue(streamArg)}`);
         }
       },
       "read-line": (...args: LispValue[]): LispValue => {
@@ -526,30 +696,33 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
 
   // Format Lisp values for output
   function formatLispValue(value: LispValue): string {
-    if (value === undefined || value === null) {
-      return "NIL"
-    } else if (Array.isArray(value)) {
-      if (value.length === 0) {
-        return "NIL"
-      }
-      return "(" + value.map(formatLispValue).join(" ") + ")"
-    } else if (typeof value === "function") {
-      return "#<FUNCTION>"
-    } else if (typeof value === "string") {
-      return value
-    } else {
-      return String(value)
-    }
+    if (value === null) return "NIL"; // Handles Lisp nil if parsed as null
+    if (Array.isArray(value) && value.length === 0) return "NIL"; // Handles Lisp nil if parsed as []
+
+    if (value instanceof String) return value.valueOf(); // String object to primitive string
+    if (typeof value === 'string') return value; // Primitive string (symbols)
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'boolean') return value ? "T" : "NIL"; // Booleans as T or NIL
+    if (Array.isArray(value)) return "(" + value.map(formatLispValue).join(" ") + ")"; // Lists
+    if (typeof value === 'function') return "#<FUNCTION>";
+    if (value === undefined) return "NIL"; // Should ideally not happen
+
+    // Fallback for any other LispValue types if necessary
+    return String(value);
   }
 
   // Evaluate an expression in an environment
   function evaluate(exp: LispValue, env: Record<string, LispValue>): LispValue {
     // Self-evaluating expressions
-    if (typeof exp === "number" || typeof exp === "boolean" || (typeof exp === "string" && exp.startsWith('"'))) {
+    if (typeof exp === "number" || typeof exp === "boolean") {
       return exp
     }
+    // If exp is a String object, it's a parsed string literal. Get its primitive value.
+    if (exp instanceof String) {
+      return exp.valueOf()
+    }
 
-    // Symbol lookup
+    // Symbol lookup (exp here will be a primitive string if it's a symbol)
     if (typeof exp === "string") {
       if (exp in env) {
         return env[exp]
