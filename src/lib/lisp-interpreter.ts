@@ -1,7 +1,7 @@
 import { LispValue, LispFunction, LispList } from './types'
 
 // Lisp interpreter implementation
-export function evaluateLisp(program: string): string {
+export function evaluateLisp(program: string, inputProvider?: () => string): string {
   // Global environment to store variables and functions
   const globalEnv: Record<string, LispValue> = {}
 
@@ -120,7 +120,7 @@ export function evaluateLisp(program: string): string {
   }
 
   // Create the initial environment with basic operations
-  function createEnvironment(): Record<string, LispValue> {
+  function createEnvironment(currentInputProvider?: () => string): Record<string, LispValue> {
     const env: Record<string, LispValue> = {
       // Arithmetic operations
       "+": (...args: LispValue[]): LispValue => {
@@ -496,6 +496,13 @@ export function evaluateLisp(program: string): string {
         } else {
           return null;
         }
+      },
+      "read-line": (...args: LispValue[]): LispValue => {
+        if (args.length !== 0) throw new Error("read-line: Expected 0 arguments");
+        if (currentInputProvider) {
+          return currentInputProvider();
+        }
+        throw new Error("read-line: No input provider configured for the interpreter.");
       },
 
       // Exit functions
@@ -984,7 +991,7 @@ export function evaluateLisp(program: string): string {
     // Clear output buffer
     outputBuffer = []
 
-    const env: Record<string, LispValue> = createEnvironment()
+    const env: Record<string, LispValue> = createEnvironment(inputProvider)
     const currentTokens = [...tokens]
 
     // Evaluate all expressions
