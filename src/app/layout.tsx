@@ -3,8 +3,8 @@ import './globals.css'
 import Footer from '@/src/components/footer'
 
 export const metadata: Metadata = {
-  title: 'Lisp Interpreter',
-  description: 'Open-source web app for writing Lisp code in the browser. Includes code evaluation and example programs like arithmetic and Fibonacci.',
+  title: "Lisp Interpreter",
+  description: "Open-source web app for writing Lisp code in the browser. Includes code evaluation and example programs like arithmetic and Fibonacci.",
 }
 
 export default function RootLayout({
