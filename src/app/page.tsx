@@ -135,7 +135,7 @@ export default function LispInterpreter() {
       {/* Main content area - with responsive layout */}
       <div className="p-4 pb-1 gap-4 flex-1 overflow-auto flex flex-col md:flex-row md:pb-4">
         {/* Code Input Section - Left column on desktop, top section on mobile */}
-        <div className="flex flex-col gap-2 min-h-0 flex-shrink-0 md:flex-1 md:min-w-0">
+        <div className="flex flex-col gap-2 min-h-0 shrink-0 md:flex-1 md:min-w-0">
           <h2 className="text-lg font-medium">Code</h2>
           <textarea
             value={input}
@@ -155,7 +155,7 @@ export default function LispInterpreter() {
               id="runtimeUserInput"
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded shadow-sm font-mono overflow-y-auto resize-none"
+              className="w-full p-3 border border-gray-300 rounded shadow-xs font-mono overflow-y-auto resize-none"
               placeholder="Multi-line input for Lisp program..."
               rows={5}
               spellCheck={false}
