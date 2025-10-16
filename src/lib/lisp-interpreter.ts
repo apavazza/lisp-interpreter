@@ -473,13 +473,16 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
 
       // I/O functions – these update the outputBuffer
       print: (...args: LispValue[]): LispValue => {
-        const output = args.map(formatLispValue).join(" ");
+        const output = args
+          .map(arg => formatLispValue(arg))
+          .join(" ")
+          .toUpperCase();
         outputBuffer.push(output);
         return args[args.length - 1];
       },
       prin1: (...args: LispValue[]): LispValue => {
         if (args.length !== 1) throw new Error("prin1: Expected exactly 1 argument");
-        const output = formatLispValue(args[0]);
+        const output = formatLispValue(args[0]).toUpperCase();
         outputBuffer.push(output);
         return args[0];
       },
