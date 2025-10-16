@@ -203,17 +203,27 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
       // List operations – all use variadic parameters
       car: (...args: LispValue[]): LispValue => {
         if (args.length !== 1) throw new Error("car: Expected exactly 1 argument");
-        const list = args[0];
-        if (!Array.isArray(list)) throw new Error("car: Expected list");
-        if (list.length === 0) throw new Error("car: Empty list");
-        return list[0];
+        const val = args[0];
+        if (Array.isArray(val)) {
+          if (val.length === 0) throw new Error("car: Empty list");
+          return val[0];
+        } else if (typeof val === 'object' && val !== null && (val as any).__dotted_pair) {
+          return (val as any).car;
+        } else {
+          throw new Error("car: Expected list or dotted pair");
+        }
       },
       cdr: (...args: LispValue[]): LispValue => {
         if (args.length !== 1) throw new Error("cdr: Expected exactly 1 argument");
-        const list = args[0];
-        if (!Array.isArray(list)) throw new Error("cdr: Expected list");
-        if (list.length === 0) throw new Error("cdr: Empty list");
-        return list.slice(1);
+        const val = args[0];
+        if (Array.isArray(val)) {
+          if (val.length === 0) throw new Error("cdr: Empty list");
+          return val.slice(1);
+        } else if (typeof val === 'object' && val !== null && (val as any).__dotted_pair) {
+          return (val as any).cdr;
+        } else {
+          throw new Error("cdr: Expected list or dotted pair");
+        }
       },
       rest: (...args: LispValue[]): LispValue => {
         if (args.length !== 1) throw new Error("rest: Expected exactly 1 argument");
@@ -224,9 +234,13 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
       },
       cons: (...args: LispValue[]): LispValue => {
         if (args.length !== 2) throw new Error("cons: Expected exactly 2 arguments");
-        const [item, list] = args;
-        if (!Array.isArray(list)) throw new Error("cons: Second argument must be a list");
-        return [item, ...list];
+        const [item, rest] = args;
+        if (Array.isArray(rest)) {
+          return [item, ...rest];
+        } else {
+          // Represent dotted pair as a special object
+          return { car: item, cdr: rest, __dotted_pair: true };
+        }
       },
       list: (...args: LispValue[]): LispValue => args,
       append: (...args: LispValue[]): LispValue => {
@@ -701,6 +715,12 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
   function formatLispValue(value: LispValue): string {
     if (value === null) return "NIL"; // Handles Lisp nil if parsed as null
     if (Array.isArray(value) && value.length === 0) return "NIL"; // Handles Lisp nil if parsed as []
+
+    // Dotted pair
+    if (typeof value === 'object' && value !== null && (value as any).__dotted_pair) {
+      const pair = value as { car: LispValue, cdr: LispValue };
+      return `(${formatLispValue(pair.car)} . ${formatLispValue(pair.cdr)})`;
+    }
 
     if (value instanceof String) return value.valueOf(); // String object to primitive string
     if (typeof value === 'string') return value; // Primitive string (symbols)
