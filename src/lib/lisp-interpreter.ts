@@ -109,95 +109,170 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
     } else if (token === ")") {
       throw new Error("Unexpected closing parenthesis")
     } else if (token?.startsWith('"') && token.endsWith('"')) {
-      // Handle string literals: return a String object to distinguish from symbols
-      return new String(token.slice(1, -1))
+      // Handle string literals: return a LispString wrapper to distinguish from symbols
+      return { __string: token.slice(1, -1) }
     } else {
-      // Return atom (number or symbol)
+      // Return atom (number, rational, or symbol)
       if (token === "nil") return []
       if (token === "t") return true
+      // Rational number: match a/b where a and b are integers
+      const rationalMatch = token?.match(/^(-?\d+)\/(\d+)$/);
+      if (rationalMatch) {
+        return { num: parseInt(rationalMatch[1], 10), den: parseInt(rationalMatch[2], 10), __rational: true };
+      }
       return token !== undefined && isNaN(Number(token)) ? token : Number(token)
     }
   }
 
   // Create the initial environment with basic operations
   function createEnvironment(currentInputProvider?: () => string): Record<string, LispValue> {
+    // Utility: check if value is a rational
+    type LispRational = { num: number, den: number, __rational: true };
+    function isRational(val: LispValue): val is LispRational {
+      return typeof val === 'object' && val !== null && (val as { __rational?: boolean }).__rational === true && typeof (val as { num?: number }).num === 'number' && typeof (val as { den?: number }).den === 'number';
+    }
+    // Utility: convert number or rational to JS number
+    function toNumber(val: LispValue): number {
+      if (typeof val === 'number') return val;
+      if (isRational(val)) return val.num / val.den;
+      throw new Error('Argument must be number or rational');
+    }
     const env: Record<string, LispValue> = {
       // Arithmetic operations
       "+": (...args: LispValue[]): LispValue => {
-        if (!args.every(arg => typeof arg === "number")) {
-          throw new Error("+: All arguments must be numbers");
+        // Support numbers and rationals
+        let acc: number | { num: number, den: number, __rational: true } = 0;
+        for (const arg of args) {
+          if (typeof acc === 'number' && typeof arg === 'number') {
+            acc += arg;
+          } else if (typeof acc === 'number' && isRational(arg)) {
+            acc = { num: acc * arg.den + arg.num, den: arg.den, __rational: true };
+          } else if (isRational(acc) && typeof arg === 'number') {
+            acc = { num: acc.num + arg * acc.den, den: acc.den, __rational: true };
+          } else if (isRational(acc) && isRational(arg)) {
+            acc = { num: acc.num * arg.den + arg.num * acc.den, den: acc.den * arg.den, __rational: true };
+          } else {
+            throw new Error("+: Only numbers and rationals supported");
+          }
         }
-        return (args as number[]).reduce((a, b) => a + b, 0);
+        if (isRational(acc)) {
+          const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+          const d = gcd(Math.abs(acc.num), Math.abs(acc.den));
+          return { num: acc.num / d, den: acc.den / d, __rational: true };
+        }
+        return acc;
       },
       "-": (...args: LispValue[]): LispValue => {
-        if (!args.every(arg => typeof arg === "number")) {
-          throw new Error("-: All arguments must be numbers");
+        if (args.length === 1) {
+          const x = args[0];
+          if (typeof x === 'number') return -x;
+          if (isRational(x)) return { num: -x.num, den: x.den, __rational: true };
+          throw new Error("-: Argument must be number or rational");
         }
-        const nums = args as number[];
-        return nums.length === 1 ? -nums[0] : nums.reduce((a, b, i) => (i === 0 ? a : a - b));
+        let acc = args[0];
+        for (let i = 1; i < args.length; i++) {
+          const arg = args[i];
+          if (typeof acc === 'number' && typeof arg === 'number') {
+            acc -= arg;
+          } else if (typeof acc === 'number' && isRational(arg)) {
+            acc = { num: acc * arg.den - arg.num, den: arg.den, __rational: true };
+          } else if (isRational(acc) && typeof arg === 'number') {
+            acc = { num: acc.num - arg * acc.den, den: acc.den, __rational: true };
+          } else if (isRational(acc) && isRational(arg)) {
+            acc = { num: acc.num * arg.den - arg.num * acc.den, den: acc.den * arg.den, __rational: true };
+          } else {
+            throw new Error("-: Only numbers and rationals supported");
+          }
+        }
+        if (isRational(acc)) {
+          const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+          const d = gcd(Math.abs(acc.num), Math.abs(acc.den));
+          return { num: acc.num / d, den: acc.den / d, __rational: true };
+        }
+        return acc;
       },
       "*": (...args: LispValue[]): LispValue => {
-        if (!args.every(arg => typeof arg === "number")) {
-          throw new Error("*: All arguments must be numbers");
+        let acc: number | { num: number, den: number, __rational: true } = 1;
+        for (const arg of args) {
+          if (typeof acc === 'number' && typeof arg === 'number') {
+            acc *= arg;
+          } else if (typeof acc === 'number' && isRational(arg)) {
+            acc = { num: acc * arg.num, den: arg.den, __rational: true };
+          } else if (isRational(acc) && typeof arg === 'number') {
+            acc = { num: acc.num * arg, den: acc.den, __rational: true };
+          } else if (isRational(acc) && isRational(arg)) {
+            acc = { num: acc.num * arg.num, den: acc.den * arg.den, __rational: true };
+          } else {
+            throw new Error("*: Only numbers and rationals supported");
+          }
         }
-        return (args as number[]).reduce((a, b) => a * b, 1);
+        if (isRational(acc)) {
+          const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+          const d = gcd(Math.abs(acc.num), Math.abs(acc.den));
+          return { num: acc.num / d, den: acc.den / d, __rational: true };
+        }
+        return acc;
       },
       "/": (...args: LispValue[]): LispValue => {
-        if (!args.every(arg => typeof arg === "number")) {
-          throw new Error("/: All arguments must be numbers");
+        if (args.length === 1) {
+          const x = args[0];
+          if (typeof x === 'number') return 1 / x;
+          if (isRational(x)) return { num: x.den, den: x.num, __rational: true };
+          throw new Error("/: Argument must be number or rational");
         }
-        const nums = args as number[];
-        return nums.length === 1 ? 1 / nums[0] : nums.reduce((a, b, i) => (i === 0 ? a : a / b));
+        let acc = args[0];
+        for (let i = 1; i < args.length; i++) {
+          const arg = args[i];
+          if (typeof acc === 'number' && typeof arg === 'number') {
+            acc /= arg;
+          } else if (typeof acc === 'number' && isRational(arg)) {
+            acc = { num: acc * arg.den, den: arg.num, __rational: true };
+          } else if (isRational(acc) && typeof arg === 'number') {
+            acc = { num: acc.num, den: acc.den * arg, __rational: true };
+          } else if (isRational(acc) && isRational(arg)) {
+            acc = { num: acc.num * arg.den, den: acc.den * arg.num, __rational: true };
+          } else {
+            throw new Error("/: Only numbers and rationals supported");
+          }
+        }
+        if (isRational(acc)) {
+          const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+          const d = gcd(Math.abs(acc.num), Math.abs(acc.den));
+          return { num: acc.num / d, den: acc.den / d, __rational: true };
+        }
+        return acc;
       },
       mod: (...args: LispValue[]): LispValue => {
         if (args.length !== 2) throw new Error("mod: Expected exactly 2 arguments");
         const [a, b] = args;
-        if (typeof a !== "number" || typeof b !== "number") {
-          throw new Error("mod: Both arguments must be numbers");
-        }
-        return a % b;
+        return toNumber(a) % toNumber(b);
       },
 
       // Comparison operations
       ">": (...args: LispValue[]): LispValue => {
         if (args.length !== 2) throw new Error(">: Expected exactly 2 arguments");
         const [a, b] = args;
-        if (typeof a !== "number" || typeof b !== "number") {
-          throw new Error(">: Both arguments must be numbers");
-        }
-        return a > b;
+        return toNumber(a) > toNumber(b);
       },
       "<": (...args: LispValue[]): LispValue => {
         if (args.length !== 2) throw new Error("<: Expected exactly 2 arguments");
         const [a, b] = args;
-        if (typeof a !== "number" || typeof b !== "number") {
-          throw new Error("<: Both arguments must be numbers");
-        }
-        return a < b;
+        return toNumber(a) < toNumber(b);
       },
       ">=": (...args: LispValue[]): LispValue => {
         if (args.length !== 2) throw new Error(">=: Expected exactly 2 arguments");
         const [a, b] = args;
-        if (typeof a !== "number" || typeof b !== "number") {
-          throw new Error(">=: Both arguments must be numbers");
-        }
-        return a >= b;
+        return toNumber(a) >= toNumber(b);
       },
       "<=": (...args: LispValue[]): LispValue => {
         if (args.length !== 2) throw new Error("<=: Expected exactly 2 arguments");
         const [a, b] = args;
-        if (typeof a !== "number" || typeof b !== "number") {
-          throw new Error("<=: Both arguments must be numbers");
-        }
-        return a <= b;
+        return toNumber(a) <= toNumber(b);
       },
       "=": (...args: LispValue[]): LispValue => {
         if (args.length !== 2) throw new Error("=: Expected exactly 2 arguments");
         const [a, b] = args;
-        if (typeof a !== "number" || typeof b !== "number") {
-          throw new Error("=: Both arguments must be numbers");
-        }
-        return a === b;
+        return toNumber(a) === toNumber(b);
       },
 
       // List operations – all use variadic parameters
@@ -207,8 +282,8 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
         if (Array.isArray(val)) {
           if (val.length === 0) throw new Error("car: Empty list");
           return val[0];
-        } else if (typeof val === 'object' && val !== null && (val as any).__dotted_pair) {
-          return (val as any).car;
+        } else if (typeof val === 'object' && val !== null && (val as { __dotted_pair?: boolean }).__dotted_pair) {
+          return (val as { car: LispValue }).car;
         } else {
           throw new Error("car: Expected list or dotted pair");
         }
@@ -219,8 +294,8 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
         if (Array.isArray(val)) {
           if (val.length === 0) throw new Error("cdr: Empty list");
           return val.slice(1);
-        } else if (typeof val === 'object' && val !== null && (val as any).__dotted_pair) {
-          return (val as any).cdr;
+        } else if (typeof val === 'object' && val !== null && (val as { __dotted_pair?: boolean }).__dotted_pair) {
+          return (val as { cdr: LispValue }).cdr;
         } else {
           throw new Error("cdr: Expected list or dotted pair");
         }
@@ -505,8 +580,8 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
         const [streamArg, formatStringArg, ...otherArgs] = args;
 
         let actualFormatString: string;
-        if (formatStringArg instanceof String) {
-          actualFormatString = formatStringArg.valueOf();
+        if (typeof formatStringArg === 'object' && formatStringArg !== null && (formatStringArg as { __string?: string }).__string !== undefined) {
+          actualFormatString = (formatStringArg as { __string: string }).__string;
         } else if (typeof formatStringArg === 'string') {
           actualFormatString = formatStringArg;
         } else {
@@ -713,16 +788,25 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
 
   // Format Lisp values for output
   function formatLispValue(value: LispValue): string {
+    // Rational number
+    if (typeof value === 'object' && value !== null && (value as { __rational?: boolean }).__rational) {
+      const rat = value as { num: number, den: number };
+      return `${rat.num}/${rat.den}`;
+    }
     if (value === null) return "NIL"; // Handles Lisp nil if parsed as null
     if (Array.isArray(value) && value.length === 0) return "NIL"; // Handles Lisp nil if parsed as []
 
     // Dotted pair
-    if (typeof value === 'object' && value !== null && (value as any).__dotted_pair) {
+    if (typeof value === 'object' && value !== null && (value as { __dotted_pair?: boolean }).__dotted_pair) {
       const pair = value as { car: LispValue, cdr: LispValue };
       return `(${formatLispValue(pair.car)} . ${formatLispValue(pair.cdr)})`;
     }
 
-    if (value instanceof String) return value.valueOf(); // String object to primitive string
+    // LispString wrapper
+    if (typeof value === 'object' && value !== null && (value as { __string?: string }).__string !== undefined) {
+      return (value as { __string: string }).__string;
+    }
+
     if (typeof value === 'string') return value; // Primitive string (symbols)
     if (typeof value === 'number') return String(value);
     if (typeof value === 'boolean') return value ? "T" : "NIL"; // Booleans as T or NIL
@@ -740,9 +824,13 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
     if (typeof exp === "number" || typeof exp === "boolean") {
       return exp
     }
-    // If exp is a String object, it's a parsed string literal. Get its primitive value.
-    if (exp instanceof String) {
-      return exp.valueOf()
+    // Self-evaluating: rationals
+    if (typeof exp === 'object' && exp !== null && (exp as { __rational?: boolean }).__rational) {
+      return exp;
+    }
+    // If exp is a LispString wrapper, return its primitive string value.
+    if (typeof exp === 'object' && exp !== null && (exp as { __string?: string }).__string !== undefined) {
+      return (exp as { __string: string }).__string
     }
 
     // Symbol lookup (exp here will be a primitive string if it's a symbol)
