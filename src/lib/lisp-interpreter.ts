@@ -554,6 +554,32 @@ export function evaluateLisp(program: string, inputProvider?: () => string): str
         return Math.sqrt(x);
       },
 
+      exp: (...args: LispValue[]): LispValue => {
+        if (args.length !== 1) throw new Error("exp: Expected exactly 1 argument");
+        return Math.exp(toNumber(args[0]));
+      },
+
+      expt: (...args: LispValue[]): LispValue => {
+        if (args.length !== 2) throw new Error("expt: Expected exactly 2 arguments");
+        const [base, power] = args;
+
+        // If power is an integer, we can try to preserve rationals
+        if (typeof power === 'number' && Number.isInteger(power)) {
+          if (isRational(base)) {
+            const p = power as number;
+            const num = Math.pow(base.num, p);
+            const den = Math.pow(base.den, p);
+            if (p < 0) {
+              return { num: den, den: num, __rational: true };
+            }
+            return { num: num, den: den, __rational: true };
+          }
+        }
+        
+        // Fallback to floating point math
+        return Math.pow(toNumber(base), toNumber(power));
+      },
+
       // Logic function
       not: (...args: LispValue[]): LispValue => {
         if (args.length !== 1) throw new Error("not: Expected exactly 1 argument");
